@@ -160,8 +160,6 @@ void usb_dev_main(void)
         tud_task();          // Run TinyUSB device task
         watchdog_update();   // Feed again after potentially long library calls
         
-        // led_blinking_task(); // Re-enabled after fixing core init race
-        
         hid_task();          // Run HID report sending task
     }
 }
@@ -221,10 +219,12 @@ bool send_hid_report(void)
         }                 
         // If the HID interface is ready, try to send the report
         if (tud_hid_ready()) {      
-            // Try to send the report, passing the correct report_id.
-            // Passing 0 ignores alternate report IDs, breaking F-keys and media keys.
-            if (tud_hid_report(stHidRpt.report_id, stHidRpt.report, stHidRpt.report_len)) {
-                USB_LOG("HID report sent (id=%d, len=%d)\n", stHidRpt.report_id, stHidRpt.report_len);
+            // BTstack already prepends the Report ID to the stHidRpt.report buffer.
+            // Passing 0 tells TinyUSB to send the buffer exactly as-is.
+            // Passing a non-zero ID here would cause TinyUSB to prepend a second ID,
+            // shifting the bytes and breaking F-keys and standard keystrokes.
+            if (tud_hid_report(0, stHidRpt.report, stHidRpt.report_len)) {
+                USB_LOG("HID report sent (len=%d)\n", stHidRpt.report_len);
                 // If sent successfully, remove the report from the queue
                 CMN_AdvanceQueue(CMN_QUE_KIND_HID_RPT);
                 bRet = true;

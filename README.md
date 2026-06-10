@@ -11,9 +11,9 @@ Because the PC sees a standard wired USB keyboard, you can use your Bluetooth ke
 ## Why This Project Exists
 This project builds upon the original concept by [Shiomachi Software](https://github.com/shiomachisoft/picow_ble_usb_hid_bridge) but introduces critical fixes and architectural improvements for modern hardware and complex keyboards:
 
-1.  **Pico 2 W (RP2350) Multicore Stability**: The original project suffered from race conditions and deadlocks on the Pico 2 W due to how the two CPU cores shared the CYW43439 wireless chip. We introduced strict **Core Isolation**: the Bluetooth stack and wireless driver run exclusively on Core 1, while the USB stack and Status LED run safely on Core 0.
+1.  **Pico 2 W (RP2350) Multicore Stability**: The original project suffered from race conditions and deadlocks on the Pico 2 W due to how the two CPU cores shared the CYW43439 wireless chip. We introduced strict **Core Isolation**: the Bluetooth stack and wireless driver run exclusively on Core 1, while the USB stack runs safely on Core 0. (Note: The Status LED task on Core 0 had to be disabled entirely, as its hardware polling conflicted with the intensive wireless operations on Core 1, leading to immediate lockups).
 2.  **The "ASUS KW100" Bug (BTstack CCC Discovery)**: Many modern keyboards (like ASUS and some Logitechs) would successfully pair but then freeze and disconnect after 30 seconds. We discovered this was due to a state machine bug in the BTstack library (`ENABLE_GATT_FIND_INFORMATION_FOR_CCC_DISCOVERY`). This firmware bypasses the bug using the more robust `ENABLE_GATT_LEGACY_CCC_DISCOVERY` method.
-3.  **Multimedia & Function Keys (F1-F12)**: The original firmware stripped "Report IDs" when forwarding keystrokes to the PC. This caused F-keys and volume buttons to stop working. We fixed the TinyUSB pipeline to properly forward these multi-report packets.
+3.  **Multimedia & Function Keys (F1-F12)**: The original firmware failed to correctly forward F-keys and media keys to the PC. We found that the `BTstack` library natively prepends the HID Report ID to the raw payload. However, the original code attempted to use a secondary feature in TinyUSB that would inject *another* Report ID, which ultimately corrupted the keystroke data when used with composite devices. We corrected the USB pipeline so that the perfectly-formed BTstack payload is sent directly, natively supporting F1-F12 and volume controls.
 4.  **Massive GATT Buffers**: We increased the internal Bluetooth descriptor memory from 500 bytes to 4096 bytes to support gaming keyboards with huge feature sets.
 
 ---
@@ -57,10 +57,10 @@ You can customize the firmware by passing these flags during the `cmake -B build
 
 ## How to Use
 
-1.  **Plug it in**: Connect the Pico to your PC. The onboard LED will start **blinking**, indicating it is scanning for Bluetooth devices.
+1.  **Plug it in**: Connect the Pico to your PC.
 2.  **Pairing Mode**: Put your Bluetooth keyboard or mouse into "Pairing Mode" (usually by holding the Bluetooth key until its LED flashes rapidly).
 3.  **Connection**: The Pico will find the keyboard and securely pair with it. (If your keyboard requires a PIN, it will print the 6-digit PIN to the USB Serial console).
-4.  **Ready**: Once the service discovery is complete, the Pico's LED will turn **solid green**. Your keyboard is now ready to use! 
+4.  **Ready**: Once the service discovery is complete, your keyboard is ready to use! 
 
 The Pico saves the pairing data. The next time you turn on your keyboard, it will reconnect automatically in under a second.
 

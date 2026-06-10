@@ -92,7 +92,20 @@
 
 //------------- CLASS -------------//
 #define CFG_TUD_HID               1
+#ifndef CFG_TUD_CDC
+#ifdef LIB_PICO_STDIO_USB
+#define CFG_TUD_CDC               1
+#else
 #define CFG_TUD_CDC               0
+#endif
+#endif
+
+#if CFG_TUD_CDC
+#define CFG_TUD_CDC_EP_BUFSIZE    64
+#define CFG_TUD_CDC_RX_BUFSIZE    64
+#define CFG_TUD_CDC_TX_BUFSIZE    64
+#endif
+
 #define CFG_TUD_MSC               0
 #define CFG_TUD_MIDI              0
 #define CFG_TUD_VENDOR            0

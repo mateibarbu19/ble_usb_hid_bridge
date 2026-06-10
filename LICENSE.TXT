@@ -1,4 +1,4 @@
-picow_ble_usb_hid_bridge is based on hog_host_demo and dev_hid_composite. Its licensing is subject to the licenses of these two original projects.
+ble_usb_hid_bridge is based on hog_host_demo and dev_hid_composite. Its licensing is subject to the licenses of these two original projects.
 
 //////////////////////////////////////////////////////////////////////////////
 // The license for hog_host_demo

@@ -34,4 +34,24 @@ enum
     REPORT_ID_COUNT
 };
 
+// Interface indexes
+enum
+{
+    ITF_NUM_HID,
+#if CFG_TUD_CDC
+    ITF_NUM_CDC,
+    ITF_NUM_CDC_DATA,
+#endif
+    ITF_NUM_TOTAL
+};
+
+// Endpoint addresses
+#define EPNUM_HID   0x81
+
+#if CFG_TUD_CDC
+#define EPNUM_CDC_NOTIF 0x82
+#define EPNUM_CDC_OUT   0x02
+#define EPNUM_CDC_IN    0x83
+#endif
+
 #endif /* USB_DESCRIPTORS_H_ */

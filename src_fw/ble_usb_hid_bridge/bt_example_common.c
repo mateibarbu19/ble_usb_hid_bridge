@@ -15,6 +15,10 @@ int btstack_main(int argc, const char * argv[]);
 
 static btstack_packet_callback_registration_t hci_event_callback_registration;
 
+// Global flag to indicate CYW43 hardware is initialized.
+// This is used to synchronize Core 0 (LED task) and Core 1 (BLE task).
+volatile bool g_cyw43_initialized = false;
+
 static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size){
     UNUSED(size);
     UNUSED(channel);
@@ -24,19 +28,22 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
         case BTSTACK_EVENT_STATE:
             if (btstack_event_state_get_state(packet) != HCI_STATE_WORKING) return;
             gap_local_bd_addr(local_addr);
-            printf("BTstack up and running on %s.\n", bd_addr_to_str(local_addr));
+            printf("[BLE] BTstack up and running on %s.\n", bd_addr_to_str(local_addr));
             break;
         default:
             break;
     }
 }
 
-int picow_bt_example_init(void) {
+int ble_bridge_bt_example_init(void) {
     // initialize CYW43 driver architecture (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
+    // We do this on Core 1 to ensure correct interrupt affinity for BTstack.
     if (cyw43_arch_init()) {
-        printf("failed to initialise cyw43_arch\n");
+        printf("[BLE] failed to initialise cyw43_arch\n");
         return -1;
     }
+
+    g_cyw43_initialized = true;
 
     // inform about BTstack state
     hci_event_callback_registration.callback = &packet_handler;
@@ -45,7 +52,7 @@ int picow_bt_example_init(void) {
     return 0;
 }
 
-void picow_bt_example_main(void) {
+void ble_bridge_bt_example_main(void) {
 
     btstack_main(0, NULL);
 }

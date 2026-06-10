@@ -25,6 +25,7 @@
 
 #include "bsp/board_api.h"
 #include "tusb.h"
+#include "hardware/watchdog.h"
 // @@add
 // =====>
 #include "Common.h"
@@ -37,6 +38,14 @@
 // =====>
 #define USB_REINIT_STABILIZATION_DELAY 100 // ms
 #define LED_BLINKING_INTERVAL 200 // ms
+
+#ifdef ENABLE_USB_LOGGING
+#define USB_LOG(...) printf("[USB] " __VA_ARGS__)
+#else
+#define USB_LOG(...)
+#endif
+
+#define SYS_LOG(...) printf("[SYS] " __VA_ARGS__)
 // <=====
 //--------------------------------------------------------------------+
 // GLOBAL VARIABLES
@@ -44,6 +53,7 @@
 // @@add
 // =====>
 volatile bool g_usb_reinit_request = false; // Flag to request USB re-initialization when BLE HID connection is established
+extern volatile bool g_cyw43_initialized;
 // <=====
 
 //--------------------------------------------------------------------+
@@ -77,11 +87,35 @@ int main(void)
     stdio_init_all();
     CMN_Init(); 
 
-    // Initialize to lock out CPU Core 0 when btstack writes to flash memory on CPU Core 1
+    // Preferred stdio might need a small delay or waiting for connection if USB
+#ifdef LIB_PICO_STDIO_USB
+    // Wait for USB connection for a short time to allow developer to see boot logs
+    // but don't block forever if it's a production use case.
+    uint32_t start_wait = board_millis();
+    while (!tud_cdc_connected() && (board_millis() - start_wait < 2000)) {
+        tud_task();
+    }
+#endif
+
+    SYS_LOG("BLE to USB HID Bridge starting...\n");
+#ifdef PICO_BOARD
+    SYS_LOG("Board: %s\n", PICO_BOARD);
+#endif
+
+    // Enable watchdog with a 10-second timeout for robustness
+    if (watchdog_caused_reboot()) {
+        SYS_LOG("Rebooted by Watchdog!\n");
+    }
+    watchdog_enable(10000, 1); // 10000ms timeout
+
+    // Initialize to lock out CPU Core 0 when btstack writes to flash memory on CPU Core 1.
+    // This is required for RP2350 multicore flash safety.
     flash_safe_execute_core_init();
 
+    SYS_LOG("Launching BLE host on Core 1...\n");
     multicore_launch_core1(ble_host_main);
 
+    SYS_LOG("Entering USB device main loop on Core 0...\n");
     usb_dev_main();
 
     return 0;
@@ -97,11 +131,23 @@ int main(void)
 // It also handles USB re-initialization requests from Core1.
 void usb_dev_main(void)
 {    
+    uint32_t last_heartbeat = 0;
+    SYS_LOG("USB Main Loop Started\n");
     while (1) 
     {
+        watchdog_update(); // Feed the watchdog
+
+        if (board_millis() - last_heartbeat > 5000) {
+            last_heartbeat = board_millis();
+#ifdef ENABLE_HEARTBEAT_LOGS
+            SYS_LOG("Heartbeat (Core 0 Running)\n");
+#endif
+        }
+
         // Check for USB re-initialization request from Core1 (BLE host)
         if (g_usb_reinit_request) {
             g_usb_reinit_request = false; 
+            SYS_LOG("USB Re-init requested\n");
             if (tud_mounted()) {
                 tud_disconnect(); // Disconnect the USB device
                 board_delay(USB_REINIT_STABILIZATION_DELAY); // Wait a bit for stabilization
@@ -112,7 +158,10 @@ void usb_dev_main(void)
         }
 
         tud_task();          // Run TinyUSB device task
-        led_blinking_task(); // Run LED blinking task
+        watchdog_update();   // Feed again after potentially long library calls
+        
+        // led_blinking_task(); // Re-enabled after fixing core init race
+        
         hid_task();          // Run HID report sending task
     }
 }
@@ -125,11 +174,13 @@ void usb_dev_main(void)
 // Invoked when device is mounted
 void tud_mount_cb(void)
 {
+    USB_LOG("Device mounted\n");
 }
 
 // Invoked when device is unmounted
 void tud_umount_cb(void)
 {
+    USB_LOG("Device unmounted\n");
 }
 
 // Invoked when usb bus is suspended
@@ -137,12 +188,14 @@ void tud_umount_cb(void)
 // Within 7ms, device must draw an average of current less than 2.5 mA from bus
 void tud_suspend_cb(bool remote_wakeup_en)
 {
+    USB_LOG("Bus suspended (remote_wakeup_en=%d)\n", remote_wakeup_en);
     (void) remote_wakeup_en;
 }
 
 // Invoked when usb bus is resumed
 void tud_resume_cb(void)
 {
+    USB_LOG("Bus resumed\n");
 }
 
 //--------------------------------------------------------------------+
@@ -168,8 +221,10 @@ bool send_hid_report(void)
         }                 
         // If the HID interface is ready, try to send the report
         if (tud_hid_ready()) {      
-            // Try to send the report
-            if (tud_hid_report(0, stHidRpt.report, stHidRpt.report_len)) {
+            // Try to send the report, passing the correct report_id.
+            // Passing 0 ignores alternate report IDs, breaking F-keys and media keys.
+            if (tud_hid_report(stHidRpt.report_id, stHidRpt.report, stHidRpt.report_len)) {
+                USB_LOG("HID report sent (id=%d, len=%d)\n", stHidRpt.report_id, stHidRpt.report_len);
                 // If sent successfully, remove the report from the queue
                 CMN_AdvanceQueue(CMN_QUE_KIND_HID_RPT);
                 bRet = true;
@@ -186,11 +241,8 @@ bool send_hid_report(void)
 //--------------------------------------------------------------------+
 void hid_task(void)
 {
-    // @@chg
-    // =====>
     // Dequeue and send one HID report.
     (void)send_hid_report();
-    // <=====
 }
 
 // Invoked when sent REPORT successfully to host
@@ -200,10 +252,7 @@ void tud_hid_report_complete_cb(uint8_t instance, uint8_t const* report, uint16_
 {
     (void) instance;
     (void) len;
-    // @@chg
-    // =====>
     (void) report;
-    // <=====
 }
 
 // Invoked when received GET_REPORT control request
@@ -225,14 +274,12 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
 // received data on OUT endpoint ( Report ID = 0, Type = 0 )
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize)
 {
+    USB_LOG("HID set report: instance=%d, id=%d, type=%d, size=%d\n", instance, report_id, report_type, bufsize);
     (void) instance;
-    // @@chg
-    // =====>
     (void) report_id;
     (void) report_type;
     (void) buffer;
     (void) bufsize;
-    // <=====
 }
 
 //--------------------------------------------------------------------+
@@ -242,8 +289,10 @@ void led_blinking_task(void)
 {
     static uint32_t start_ms = 0;
     static bool led_state = false;
-    // @@chg
-    // =====>
+
+    // Prevent Core 0 from accessing the wireless SPI bus until Core 1 has initialized it.
+    if (!g_cyw43_initialized) return;
+
     const uint32_t blink_interval = LED_BLINKING_INTERVAL;
 
     if (is_ble_app_state_ready()) {
@@ -260,5 +309,4 @@ void led_blinking_task(void)
         led_state = !led_state;
         cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, led_state);
     }
-    // <=====
 }

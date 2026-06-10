@@ -1,66 +1,77 @@
-# Pico W BLE to USB HID Bridge
+# BLE to USB HID Bridge (Pico W & Pico 2 W)
 
-## Overview
+This firmware turns your Raspberry Pi Pico W or Pico 2 W into a **Bluetooth-to-USB Bridge**. It allows you to use a Bluetooth keyboard, mouse, or other HID device as if it were directly plugged into your PC via a USB cable. 
 
-This software is firmware for the Raspberry Pi Pico W. It allows you to use a single BLE HID device, such as a keyboard or mouse, as a wired USB device, even on PCs without Bluetooth functionality. It operates as a BLE Central (Host), forwarding input data from the connected BLE device to the host PC via USB. Since it is recognized as a standard USB HID device by the PC, it can also be used in UEFI environments.
+Because the PC sees a standard wired USB keyboard, you can use your Bluetooth keyboard inside the BIOS/UEFI, or on computers that don't have Bluetooth hardware at all.
 
-<img width="716" height="391" alt="image" src="https://github.com/user-attachments/assets/6d4410d5-2912-4bd5-93dc-8aef206fb2b0" />
+## Supported Hardware
+*   **Raspberry Pi Pico W** (RP2040)
+*   **Raspberry Pi Pico 2 W** (RP2350)
 
-## Usage
+## Why This Project Exists
+This project builds upon the original concept by [Shiomachi Software](https://github.com/shiomachisoft/picow_ble_usb_hid_bridge) but introduces critical fixes and architectural improvements for modern hardware and complex keyboards:
 
-1.  **Connect Pico W**
-    *   Connect the Pico W to the PC's USB port.
-    *   In the standby state where BLE connection is not complete, the LED on the Pico W will **blink**.
+1.  **Pico 2 W (RP2350) Multicore Stability**: The original project suffered from race conditions and deadlocks on the Pico 2 W due to how the two CPU cores shared the CYW43439 wireless chip. We introduced strict **Core Isolation**: the Bluetooth stack and wireless driver run exclusively on Core 1, while the USB stack and Status LED run safely on Core 0.
+2.  **The "ASUS KW100" Bug (BTstack CCC Discovery)**: Many modern keyboards (like ASUS and some Logitechs) would successfully pair but then freeze and disconnect after 30 seconds. We discovered this was due to a state machine bug in the BTstack library (`ENABLE_GATT_FIND_INFORMATION_FOR_CCC_DISCOVERY`). This firmware bypasses the bug using the more robust `ENABLE_GATT_LEGACY_CCC_DISCOVERY` method.
+3.  **Multimedia & Function Keys (F1-F12)**: The original firmware stripped "Report IDs" when forwarding keystrokes to the PC. This caused F-keys and volume buttons to stop working. We fixed the TinyUSB pipeline to properly forward these multi-report packets.
+4.  **Massive GATT Buffers**: We increased the internal Bluetooth descriptor memory from 500 bytes to 4096 bytes to support gaming keyboards with huge feature sets.
 
-2.  **Pairing**
-    *   Put the BLE HID device (keyboards, mice, and other peripherals) you want to connect into pairing mode.
-    *   *Refer to the manual of each BLE device for how to enter pairing mode.*
+---
 
-3.  **Connection Complete**
-    *   When the Pico W detects the device and the connection is complete, the LED changes to **steady on**.
-    *   It will be recognized as a USB input device on the PC side, and operation becomes possible.
+## How to Build
 
-### Notes
-*   **Reconnection**: Once paired (bonded), you do not need to put the BLE device into pairing mode next time. It will automatically reconnect just by turning on the power.
-*   **Keyboard Behavior**: Some BLE keyboards (with power-saving features, etc.) may not enter reconnection mode unless a key is pressed to wake them from sleep. If it does not connect, try pressing a random key a few times.
+We provide a robust Nix environment for building.
 
-## Verified Devices
+### 1. Build for Pico 2 W (RP2350)
+```bash
+cd src_fw/ble_usb_hid_bridge
+nix develop .
+rm -rf build
+cmake -B build -S . -DPICO_BOARD=pico2_w
+cmake --build build
+```
 
-Operation has been verified with the following devices:
+### 2. Build for Pico W (RP2040)
+```bash
+cd src_fw/ble_usb_hid_bridge
+nix develop .
+rm -rf build
+cmake -B build -S . -DPICO_BOARD=pico_w
+cmake --build build
+```
 
-*   **Mouse**: Sanwa Supply MA-SBB314
-*   **Keyboard**: ELECOM TK-FBM119
+The resulting firmware will be located at `build/ble_usb_hid_bridge.uf2`. Hold the `BOOTSEL` button on your Pico while plugging it into your PC, and drag-and-drop the `.uf2` file onto the `RPI-RP2` drive.
 
-## Features
+---
 
-### Low Latency Efforts
-To achieve a comfortable operational feel as an input device, the following optimizations are performed:
+## Advanced Build Options (CMake)
 
-*   **Multi-core Distributed Processing**:
-    *   **Core 0**: Handles communication processing as a USB device.
-    *   **Core 1**: Handles communication processing as a BLE Host (Central).
-    *   By operating these in parallel, processing delay from BLE reception to USB transmission is minimized.
-*   **High-Speed Polling**:
-    *   The USB endpoint polling interval (`bInterval`) is set to `1` (1ms), configured to transfer reports to the PC at the fastest speed.
+You can customize the firmware by passing these flags during the `cmake -B build ...` step:
 
-### Report Pass-through
-*   **HID Report Descriptor**:
-    *   Upon completion of the BLE connection, a USB reconnection is triggered to pass the "HID Report Descriptor" acquired from the BLE device directly to the PC (USB host). This ensures that device-specific features, such as multimedia keys, are correctly recognized by the PC.
-*   **HID Input Report**:
-    *   After the BLE connection is established, the "HID Input Report" received from the BLE device is passed through to the PC (USB host) without modification.
+*   `-DPICO_STDIO_TYPE=USB` (Default): Logs debug output via the same USB cable used for the keyboard (creates a Composite USB device). You can view the logs using a serial monitor (like PuTTY or `screen`) at 115200 baud.
+*   `-DPICO_STDIO_TYPE=UART`: Sends debug logs to the hardware UART pins instead of USB.
+*   `-DENABLE_USB_LOGGING=ON`: Prints detailed USB events (e.g., when the PC suspends the USB port or when HID reports are pushed). Default is OFF.
+*   `-DENABLE_HEARTBEAT_LOGS=ON`: Prints a `[SYS] Heartbeat (Core 0 Running)` message every 5 seconds. Highly recommended if you are modifying the code and want to ensure the main loop hasn't crashed. Default is OFF.
 
-### Connection Management
-*   **Smart Scan**:
-    *   Operates by automatically switching between reconnection to known devices (bonded devices) and scanning for new devices every few seconds.
+---
 
-## Technical Details
+## How to Use
 
-### Base Projects
-This software is developed and integrated based on sample code from the following open source projects:
+1.  **Plug it in**: Connect the Pico to your PC. The onboard LED will start **blinking**, indicating it is scanning for Bluetooth devices.
+2.  **Pairing Mode**: Put your Bluetooth keyboard or mouse into "Pairing Mode" (usually by holding the Bluetooth key until its LED flashes rapidly).
+3.  **Connection**: The Pico will find the keyboard and securely pair with it. (If your keyboard requires a PIN, it will print the 6-digit PIN to the USB Serial console).
+4.  **Ready**: Once the service discovery is complete, the Pico's LED will turn **solid green**. Your keyboard is now ready to use! 
 
-*   **TinyUSB**: `dev_hid_composite` sample
-*   **BTstack**: `hog_host_demo` sample
+The Pico saves the pairing data. The next time you turn on your keyboard, it will reconnect automatically in under a second.
 
-## License
+---
 
-For license details of this software, please refer to LICENSE.TXT.
+## Guided Log Analysis (Troubleshooting)
+
+If you connect to the Pico's serial port (115200 baud), you can see what it's thinking.
+
+*   `[BLE] Scanning for HID devices...`: Normal startup state.
+*   `[BLE] Found bonded device AA:BB... Attempting fast reconnection...`: The Pico remembers your keyboard and is waking it up.
+*   `[BLE] Link layer connected. Requesting secure pairing...`: The devices are talking and setting up encryption.
+*   `[BLE] Pairing failed: Connection timeout.`: Your keyboard went to sleep or you didn't accept the pairing in time. Turn the keyboard off and on again.
+*   `[SYS] Rebooted by Watchdog!`: The firmware crashed (usually due to a code modification causing a multicore deadlock). The watchdog automatically resets the Pico to recover.

@@ -36,13 +36,13 @@
 #define MAX_NR_BNEP_CHANNELS 1
 #define MAX_NR_BNEP_SERVICES 1
 #define MAX_NR_BTSTACK_LINK_KEY_DB_MEMORY_ENTRIES  2
-#define MAX_NR_GATT_CLIENTS 1
+#define MAX_NR_GATT_CLIENTS 4
 #define MAX_NR_HCI_CONNECTIONS 2
 #define MAX_NR_HID_HOST_CONNECTIONS 1
-#define MAX_NR_HIDS_CLIENTS 1
+#define MAX_NR_HIDS_CLIENTS 4
 #define MAX_NR_HFP_CONNECTIONS 1
-#define MAX_NR_L2CAP_CHANNELS  4
-#define MAX_NR_L2CAP_SERVICES  3
+#define MAX_NR_L2CAP_CHANNELS  16
+#define MAX_NR_L2CAP_SERVICES  8
 #define MAX_NR_RFCOMM_CHANNELS 1
 #define MAX_NR_RFCOMM_MULTIPLEXERS 1
 #define MAX_NR_RFCOMM_SERVICES 1
@@ -67,7 +67,10 @@
 #define NVM_NUM_LINK_KEYS 16
 
 // We don't give btstack a malloc, so use a fixed-size ATT DB.
-#define MAX_ATT_DB_SIZE 512
+#define MAX_ATT_DB_SIZE 4096
+
+// Enable legacy CCC discovery to bypass BTstack bug where CCC is not the last descriptor
+#define ENABLE_GATT_LEGACY_CCC_DISCOVERY
 
 // BTstack HAL configuration
 #define HAVE_EMBEDDED_TIME_MS
@@ -82,6 +85,7 @@
 #define ENABLE_MICRO_ECC_FOR_LE_SECURE_CONNECTIONS
 
 #define HAVE_BTSTACK_STDIN
+#define ENABLE_HCI_DUMP_STDOUT
 
 // To get the audio demos working even with HCI dump at 115200, this truncates long ACL packets
 //#define HCI_DUMP_STDOUT_MAX_SIZE_ACL 100

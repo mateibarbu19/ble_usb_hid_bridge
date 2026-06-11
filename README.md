@@ -1,66 +1,63 @@
-# Pico W BLE to USB HID Bridge
+# Raspberry Pi Pico W / Pico 2 W BLE to USB HID Bridge Adapter
 
-## Overview
+Convert any Bluetooth Low Energy (BLE) keyboard or mouse into a wired USB KVM-compatible device using a **Raspberry Pi Pico W** (RP2040) or **Pico 2 W** (RP2350).
 
-This software is firmware for the Raspberry Pi Pico W. It allows you to use a single BLE HID device, such as a keyboard or mouse, as a wired USB device, even on PCs without Bluetooth functionality. It operates as a BLE Central (Host), forwarding input data from the connected BLE device to the host PC via USB. Since it is recognized as a standard USB HID device by the PC, it can also be used in UEFI environments.
+This firmware acts as a BLE Central (Host) adapter. It pairs with your Bluetooth peripheral and forwards the input data directly to your host PC via USB. Because your PC sees a standard wired USB HID device, you can use your Bluetooth keyboard inside BIOS/UEFI environments, KVM switches, or on computers completely lacking Bluetooth hardware. **Zero drivers required.**
 
 <img width="716" height="391" alt="image" src="https://github.com/user-attachments/assets/6d4410d5-2912-4bd5-93dc-8aef206fb2b0" />
 
-## Usage
+## ⚡ Key Features
 
-1.  **Connect Pico W**
-    *   Connect the Pico W to the PC's USB port.
-    *   In the standby state where BLE connection is not complete, the LED on the Pico W will **blink**.
+*   **Ultra Low Latency:** Utilizes strict multi-core processing. Core 0 exclusively handles 1ms-interval high-speed USB polling, while Core 1 is isolated to process the Bluetooth stack and wireless driver interrupts.
+*   **True Report Pass-through:** Natively passes the raw HID Report Descriptor and Input Reports directly from the BLE device to the PC. This guarantees flawless support for Multimedia keys, Volume controls, and F1-F12 Function keys on complex keyboards.
+*   **Smart Scan & Auto-Reconnect:** Automatically toggles between quickly reconnecting to bonded devices and scanning for new peripherals in pairing mode.
+*   **Massive Device Compatibility:** Features a massive 4096-byte GATT Attribute Database and enhanced BTstack limits to support complex gaming and multi-device keyboards (e.g., ASUS, Logitech) without stalling.
 
-2.  **Pairing**
-    *   Put the BLE HID device (keyboards, mice, and other peripherals) you want to connect into pairing mode.
-    *   *Refer to the manual of each BLE device for how to enter pairing mode.*
+## 🛠️ How to Build
 
-3.  **Connection Complete**
-    *   When the Pico W detects the device and the connection is complete, the LED changes to **steady on**.
-    *   It will be recognized as a USB input device on the PC side, and operation becomes possible.
+We provide a robust Nix Flake environment for perfectly reproducible builds. If you prefer using Visual Studio Code natively, please see the [VSCode Setup Guide](docs/vscode_instructions.md).
 
-### Notes
-*   **Reconnection**: Once paired (bonded), you do not need to put the BLE device into pairing mode next time. It will automatically reconnect just by turning on the power.
-*   **Keyboard Behavior**: Some BLE keyboards (with power-saving features, etc.) may not enter reconnection mode unless a key is pressed to wake them from sleep. If it does not connect, try pressing a random key a few times.
+### 1. Build for Pico 2 W (RP2350)
+```bash
+cd src
+nix develop .
+mkdir build && cd build
+cmake .. -DPICO_BOARD=pico2_w
+make
+```
 
-## Verified Devices
+### 2. Build for Pico W (RP2040)
+```bash
+cd src
+nix develop .
+mkdir build && cd build
+cmake .. -DPICO_BOARD=pico_w
+make
+```
 
-Operation has been verified with the following devices:
+The resulting firmware will be located at `build/ble_usb_hid_bridge.uf2`. Hold the `BOOTSEL` button on your Pico while plugging it into your PC, and drag-and-drop the `.uf2` file onto the `RPI-RP2` drive.
 
-*   **Mouse**: Sanwa Supply MA-SBB314
-*   **Keyboard**: ELECOM TK-FBM119
+## ⚙️ Advanced Build Options (CMake)
 
-## Features
+Customize your firmware by passing these flags during the `cmake ..` step:
 
-### Low Latency Efforts
-To achieve a comfortable operational feel as an input device, the following optimizations are performed:
+*   `-DPICO_STDIO_TYPE=USB` *(Default)*: Enables composite USB logging. Your Pico will appear as a composite device (HID Keyboard + CDC Serial Port), allowing you to read debug logs via a serial monitor (e.g., PuTTY, `screen`) at 115200 baud using the same USB cable.
+*   `-DPICO_STDIO_TYPE=UART`: Sends debug logs to the hardware UART pins instead of USB.
+*   `-DENABLE_USB_LOGGING=ON`: Prints highly detailed USB events (e.g., PC suspend/resume states, HID report transmissions). Default is OFF.
+*   `-DENABLE_HEARTBEAT_LOGS=ON`: Prints a `[SYS] Heartbeat (Core 0 Running)` message every 5 seconds to verify the main loop is stable. Default is OFF.
 
-*   **Multi-core Distributed Processing**:
-    *   **Core 0**: Handles communication processing as a USB device.
-    *   **Core 1**: Handles communication processing as a BLE Host (Central).
-    *   By operating these in parallel, processing delay from BLE reception to USB transmission is minimized.
-*   **High-Speed Polling**:
-    *   The USB endpoint polling interval (`bInterval`) is set to `1` (1ms), configured to transfer reports to the PC at the fastest speed.
+## 🚀 How to Use
 
-### Report Pass-through
-*   **HID Report Descriptor**:
-    *   Upon completion of the BLE connection, a USB reconnection is triggered to pass the "HID Report Descriptor" acquired from the BLE device directly to the PC (USB host). This ensures that device-specific features, such as multimedia keys, are correctly recognized by the PC.
-*   **HID Input Report**:
-    *   After the BLE connection is established, the "HID Input Report" received from the BLE device is passed through to the PC (USB host) without modification.
+1.  **Plug it in**: Connect the Pico to your PC's USB port.
+2.  **Pairing Mode**: Put your Bluetooth keyboard or mouse into "Pairing Mode" (usually by holding the Bluetooth key until its LED flashes rapidly).
+3.  **Connection**: The Pico will automatically find the keyboard and securely pair with it. *(Note: If your keyboard requires a PIN, it will print the 6-digit PIN to the USB Serial console).*
+4.  **Ready**: Once the service discovery is complete, your keyboard is immediately ready to use!
 
-### Connection Management
-*   **Smart Scan**:
-    *   Operates by automatically switching between reconnection to known devices (bonded devices) and scanning for new devices every few seconds.
+The Pico securely saves the pairing data in its flash memory. The next time you turn on your keyboard, it will reconnect automatically in under a second.
 
-## Technical Details
+## 🐛 Documentation & Troubleshooting
 
-### Base Projects
-This software is developed and integrated based on sample code from the following open source projects:
+If you are experiencing connection timeouts (especially with ASUS or Logitech keyboards), boot loops, or missing function keys on your specific fork, please read our [Troubleshooting Guide](docs/troubleshooting.md). It contains detailed explanations of how this firmware solves common BLE bridge bugs.
 
-*   **TinyUSB**: `dev_hid_composite` sample
-*   **BTstack**: `hog_host_demo` sample
-
-## License
-
-For license details of this software, please refer to LICENSE.TXT.
+## 🙏 Acknowledgements
+This project is built upon the foundational concepts established by [Shiomachi Software](https://github.com/shiomachisoft/picow_ble_usb_hid_bridge), merging sample code from **TinyUSB** (`dev_hid_composite`) and **BTstack** (`hog_host_demo`). It introduces substantial architectural rewrites to support the Pico 2 W multicore environment, fix upstream BTstack bugs, and natively pass composite media keys.

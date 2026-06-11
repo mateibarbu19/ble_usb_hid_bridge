@@ -23,12 +23,15 @@ if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
-set(PICO_BOARD pico_w CACHE STRING "Board type")
+# Default to pico2_w if not specified, but allow override
+if(NOT PICO_BOARD)
+    set(PICO_BOARD pico2_w CACHE STRING "Board type")
+endif()
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(picow_ble_usb_hid_bridge C CXX ASM)
+project(ble_usb_hid_bridge C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
@@ -40,16 +43,18 @@ add_compile_options(-Wall
         )
 
 # Add executable.  
-add_executable(picow_ble_usb_hid_bridge
+add_executable(ble_usb_hid_bridge
     main.c
     usb_descriptors.c
     hog_host_demo.c
-    picow_bt_example_common.c
+    bt_example_common.c
     Common.c
     )  
-target_link_libraries(picow_ble_usb_hid_bridge
+
+target_link_libraries(ble_usb_hid_bridge
     pico_stdlib
     pico_multicore
+    pico_flash
     hardware_sync
     pico_unique_id
     tinyusb_device
@@ -59,19 +64,22 @@ target_link_libraries(picow_ble_usb_hid_bridge
     pico_btstack_cyw43
     pico_cyw43_arch_threadsafe_background
     )   
-target_include_directories(picow_ble_usb_hid_bridge PRIVATE
+
+target_include_directories(ble_usb_hid_bridge PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     )
-target_compile_definitions(picow_ble_usb_hid_bridge PRIVATE 
+
+target_compile_definitions(ble_usb_hid_bridge PRIVATE 
     CYW43_LWIP=0
     )    
-pico_btstack_make_gatt_header(picow_ble_usb_hid_bridge PRIVATE 
+
+pico_btstack_make_gatt_header(ble_usb_hid_bridge PRIVATE 
     ${CMAKE_CURRENT_LIST_DIR}/hog_host_demo.gatt
     )
 
 # disable usb output, enable uart output
-pico_enable_stdio_usb(picow_ble_usb_hid_bridge 0)
-pico_enable_stdio_uart(picow_ble_usb_hid_bridge 1)
+pico_enable_stdio_usb(ble_usb_hid_bridge 0)
+pico_enable_stdio_uart(ble_usb_hid_bridge 1)
 
 # create map/bin/hex/uf2 file etc.
-pico_add_extra_outputs(picow_ble_usb_hid_bridge)
+pico_add_extra_outputs(ble_usb_hid_bridge)

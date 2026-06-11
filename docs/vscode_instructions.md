@@ -14,7 +14,7 @@ Raspberry Pi Pico extension: 0.19.0
 
 2. Click "Import Project" via the Raspberry Pi Pico extension.
 
-3. Select the "picow_ble_usb_hid_bridge" folder (where the FW source files are located) for "Location".
+3. Select the "src" folder (where the FW source files are located) for "Location".
 
 4. Select "v2.2.0" for "Select Pico SDK version".
 

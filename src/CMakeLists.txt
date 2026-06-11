@@ -28,6 +28,10 @@ if(NOT PICO_BOARD)
     set(PICO_BOARD pico2_w CACHE STRING "Board type")
 endif()
 
+option(ENABLE_USB_LOGGING "Enable USB interface logging" OFF)
+option(ENABLE_HEARTBEAT_LOGS "Enable periodic heartbeat logs" OFF)
+set(PICO_STDIO_TYPE "USB" CACHE STRING "Type of stdio: USB, UART, or BOTH")
+
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
@@ -73,13 +77,32 @@ target_compile_definitions(ble_usb_hid_bridge PRIVATE
     CYW43_LWIP=0
     )    
 
+if(ENABLE_USB_LOGGING)
+    target_compile_definitions(ble_usb_hid_bridge PRIVATE ENABLE_USB_LOGGING=1)
+endif()
+
+if(ENABLE_HEARTBEAT_LOGS)
+    target_compile_definitions(ble_usb_hid_bridge PRIVATE ENABLE_HEARTBEAT_LOGS=1)
+endif()
+
 pico_btstack_make_gatt_header(ble_usb_hid_bridge PRIVATE 
     ${CMAKE_CURRENT_LIST_DIR}/hog_host_demo.gatt
     )
 
-# disable usb output, enable uart output
-pico_enable_stdio_usb(ble_usb_hid_bridge 0)
-pico_enable_stdio_uart(ble_usb_hid_bridge 1)
+# Stdio configuration
+if(PICO_STDIO_TYPE STREQUAL "USB")
+    pico_enable_stdio_usb(ble_usb_hid_bridge 1)
+    pico_enable_stdio_uart(ble_usb_hid_bridge 0)
+    target_compile_definitions(ble_usb_hid_bridge PRIVATE LIB_PICO_STDIO_USB=1)
+elseif(PICO_STDIO_TYPE STREQUAL "UART")
+    pico_enable_stdio_usb(ble_usb_hid_bridge 0)
+    pico_enable_stdio_uart(ble_usb_hid_bridge 1)
+    target_compile_definitions(ble_usb_hid_bridge PRIVATE LIB_PICO_STDIO_UART=1)
+elseif(PICO_STDIO_TYPE STREQUAL "BOTH")
+    pico_enable_stdio_usb(ble_usb_hid_bridge 1)
+    pico_enable_stdio_uart(ble_usb_hid_bridge 1)
+    target_compile_definitions(ble_usb_hid_bridge PRIVATE LIB_PICO_STDIO_USB=1 LIB_PICO_STDIO_UART=1)
+endif()
 
 # create map/bin/hex/uf2 file etc.
 pico_add_extra_outputs(ble_usb_hid_bridge)

@@ -55,9 +55,16 @@ tusb_desc_device_t const desc_device =
     .bLength                = sizeof(tusb_desc_device_t),
     .bDescriptorType        = TUSB_DESC_DEVICE,
     .bcdUSB                 = USB_BCD,
+#if CFG_TUD_CDC
+    // Use Interface Association Descriptor (IAD) for CDC
+    .bDeviceClass           = TUSB_CLASS_MISC,
+    .bDeviceSubClass        = MISC_SUBCLASS_COMMON,
+    .bDeviceProtocol        = MISC_PROTOCOL_IAD,
+#else
     .bDeviceClass           = 0x00,
     .bDeviceSubClass        = 0x00,
     .bDeviceProtocol        = 0x00,
+#endif
     .bMaxPacketSize0        = CFG_TUD_ENDPOINT0_SIZE,
 
     .idVendor               = USB_VID,
@@ -112,29 +119,9 @@ uint8_t const * tud_hid_descriptor_report_cb(uint8_t instance)
 // Configuration Descriptor
 //--------------------------------------------------------------------+
 
-enum
-{
-    ITF_NUM_HID,
-    ITF_NUM_TOTAL
-};
+#define     CONFIG_TOTAL_LEN    (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + (CFG_TUD_CDC * TUD_CDC_DESC_LEN))
 
-#define     CONFIG_TOTAL_LEN    (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
-
-#define EPNUM_HID   0x81
-
-// @@chg
-// =====>
-#if 0
-uint8_t const desc_configuration[] =
-{
-    // Config number, interface count, string index, total length, attribute, power in mA
-    TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-
-    // Interface number, string index, protocol, report descriptor len, EP In address, size & polling interval
-    TUD_HID_DESCRIPTOR(ITF_NUM_HID, 0, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report), EPNUM_HID, CFG_TUD_HID_EP_BUFSIZE, 5)
-};
-#endif
-#define DYNAMIC_CONFIG_BUF_SIZE (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
+#define DYNAMIC_CONFIG_BUF_SIZE (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + TUD_CDC_DESC_LEN)
 // Align the buffer to 4 bytes to ensure efficient and safe access
 static uint8_t desc_configuration[DYNAMIC_CONFIG_BUF_SIZE] __attribute__((aligned(4)));
 // <=====
@@ -167,12 +154,11 @@ uint8_t const * tud_descriptor_configuration_cb(uint8_t index)
     config_desc->bLength = sizeof(tusb_desc_configuration_t);
     config_desc->bDescriptorType = TUSB_DESC_CONFIGURATION;
     // wTotalLength will be set later
-    // config_desc->wTotalLength is set at the end or calculated dynamically
     config_desc->bNumInterfaces = ITF_NUM_TOTAL;
     config_desc->bConfigurationValue = 1;
     config_desc->iConfiguration = 0;
     config_desc->bmAttributes = TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP;
-    // Request 500mA (250 * 2mA) to ensure sufficient power for Pico W (WiFi/BLE)
+    // Request 500mA (250 * 2mA) to ensure sufficient power for Pico W / Pico 2 W (WiFi/BLE)
     config_desc->bMaxPower = 250;
     p_desc += sizeof(tusb_desc_configuration_t);
 
@@ -199,12 +185,8 @@ uint8_t const * tud_descriptor_configuration_cb(uint8_t index)
     *p_desc++ = HID_DESC_TYPE_REPORT; // bDescriptorType
     tu_unaligned_write16(p_desc, report_desc_len); p_desc += 2; // wDescriptorLength
     
-    // 4. Build Endpoint Descriptor
+    // 4. Build HID Endpoint Descriptor
     tusb_desc_endpoint_t *ep_desc = (tusb_desc_endpoint_t*) p_desc;
-    // Set wTotalLength
-    // Use tu_htole16 for portability (though RP2040 is little-endian)
-    config_desc->wTotalLength = tu_htole16((uint16_t)(p_desc - desc_configuration) + sizeof(tusb_desc_endpoint_t));
-
     ep_desc->bLength = sizeof(tusb_desc_endpoint_t);
     ep_desc->bDescriptorType = TUSB_DESC_ENDPOINT;
     ep_desc->bEndpointAddress = EPNUM_HID;
@@ -212,6 +194,96 @@ uint8_t const * tud_descriptor_configuration_cb(uint8_t index)
     ep_desc->wMaxPacketSize = CFG_TUD_HID_EP_BUFSIZE;
     ep_desc->bInterval = 1;
     p_desc += sizeof(tusb_desc_endpoint_t);
+
+#if CFG_TUD_CDC
+    // 5. Build CDC Descriptor
+    // IAD, Control Interface, Functional Descriptors, and Data Interface
+    // We can use the TUD_CDC_DESCRIPTOR macro logic here or just copy it.
+    // TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 0, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64)
+    
+    // IAD
+    *p_desc++ = 8; // bLength
+    *p_desc++ = TUSB_DESC_INTERFACE_ASSOCIATION; // bDescriptorType
+    *p_desc++ = ITF_NUM_CDC; // bFirstInterface
+    *p_desc++ = 2; // bInterfaceCount
+    *p_desc++ = TUSB_CLASS_CDC; // bFunctionClass
+    *p_desc++ = CDC_COMM_SUBCLASS_ABSTRACT_CONTROL_MODEL; // bFunctionSubClass
+    *p_desc++ = CDC_COMM_PROTOCOL_NONE; // bFunctionProtocol
+    *p_desc++ = 0; // iFunction
+
+    // CDC Control Interface
+    if_desc = (tusb_desc_interface_t*) p_desc;
+    if_desc->bLength = sizeof(tusb_desc_interface_t);
+    if_desc->bDescriptorType = TUSB_DESC_INTERFACE;
+    if_desc->bInterfaceNumber = ITF_NUM_CDC;
+    if_desc->bAlternateSetting = 0;
+    if_desc->bNumEndpoints = 1;
+    if_desc->bInterfaceClass = TUSB_CLASS_CDC;
+    if_desc->bInterfaceSubClass = CDC_COMM_SUBCLASS_ABSTRACT_CONTROL_MODEL;
+    if_desc->bInterfaceProtocol = CDC_COMM_PROTOCOL_NONE;
+    if_desc->iInterface = 0;
+    p_desc += sizeof(tusb_desc_interface_t);
+
+    // CDC Functional Descriptors
+    // Header
+    *p_desc++ = 5; *p_desc++ = TUSB_DESC_CS_INTERFACE; *p_desc++ = CDC_FUNC_DESC_HEADER;
+    tu_unaligned_write16(p_desc, 0x0110); p_desc += 2;
+    // Call Management
+    *p_desc++ = 5; *p_desc++ = TUSB_DESC_CS_INTERFACE; *p_desc++ = CDC_FUNC_DESC_CALL_MANAGEMENT;
+    *p_desc++ = 0; *p_desc++ = ITF_NUM_CDC_DATA;
+    // ACM
+    *p_desc++ = 4; *p_desc++ = TUSB_DESC_CS_INTERFACE; *p_desc++ = CDC_FUNC_DESC_ABSTRACT_CONTROL_MANAGEMENT;
+    *p_desc++ = 2;
+    // Union
+    *p_desc++ = 5; *p_desc++ = TUSB_DESC_CS_INTERFACE; *p_desc++ = CDC_FUNC_DESC_UNION;
+    *p_desc++ = ITF_NUM_CDC; *p_desc++ = ITF_NUM_CDC_DATA;
+
+    // CDC Control Endpoint
+    ep_desc = (tusb_desc_endpoint_t*) p_desc;
+    ep_desc->bLength = sizeof(tusb_desc_endpoint_t);
+    ep_desc->bDescriptorType = TUSB_DESC_ENDPOINT;
+    ep_desc->bEndpointAddress = EPNUM_CDC_NOTIF;
+    ep_desc->bmAttributes.xfer = TUSB_XFER_INTERRUPT;
+    ep_desc->wMaxPacketSize = 8;
+    ep_desc->bInterval = 16;
+    p_desc += sizeof(tusb_desc_endpoint_t);
+
+    // CDC Data Interface
+    if_desc = (tusb_desc_interface_t*) p_desc;
+    if_desc->bLength = sizeof(tusb_desc_interface_t);
+    if_desc->bDescriptorType = TUSB_DESC_INTERFACE;
+    if_desc->bInterfaceNumber = ITF_NUM_CDC_DATA;
+    if_desc->bAlternateSetting = 0;
+    if_desc->bNumEndpoints = 2;
+    if_desc->bInterfaceClass = TUSB_CLASS_CDC_DATA;
+    if_desc->bInterfaceSubClass = 0;
+    if_desc->bInterfaceProtocol = 0;
+    if_desc->iInterface = 0;
+    p_desc += sizeof(tusb_desc_interface_t);
+
+    // CDC Data Endpoints
+    // OUT
+    ep_desc = (tusb_desc_endpoint_t*) p_desc;
+    ep_desc->bLength = sizeof(tusb_desc_endpoint_t);
+    ep_desc->bDescriptorType = TUSB_DESC_ENDPOINT;
+    ep_desc->bEndpointAddress = EPNUM_CDC_OUT;
+    ep_desc->bmAttributes.xfer = TUSB_XFER_BULK;
+    ep_desc->wMaxPacketSize = 64;
+    ep_desc->bInterval = 0;
+    p_desc += sizeof(tusb_desc_endpoint_t);
+    // IN
+    ep_desc = (tusb_desc_endpoint_t*) p_desc;
+    ep_desc->bLength = sizeof(tusb_desc_endpoint_t);
+    ep_desc->bDescriptorType = TUSB_DESC_ENDPOINT;
+    ep_desc->bEndpointAddress = EPNUM_CDC_IN;
+    ep_desc->bmAttributes.xfer = TUSB_XFER_BULK;
+    ep_desc->wMaxPacketSize = 64;
+    ep_desc->bInterval = 0;
+    p_desc += sizeof(tusb_desc_endpoint_t);
+#endif
+
+    // Set wTotalLength
+    config_desc->wTotalLength = tu_htole16((uint16_t)(p_desc - desc_configuration));
 
     TU_ASSERT(p_desc <= desc_end, NULL);
     // <=====
@@ -235,8 +307,8 @@ enum {
 char const *string_desc_arr[] =
 {
     (const char[]) { 0x09, 0x04 }, // 0: is supported language is English (0x0409)
-    "TinyUSB",                     // 1: Manufacturer
-    "TinyUSB Device",              // 2: Product
+    "Raspberry Pi",                // 1: Manufacturer
+    "BLE to USB HID Bridge",       // 2: Product
     NULL,                          // 3: Serials will use unique ID if possible
 };
 
